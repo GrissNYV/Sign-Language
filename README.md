@@ -98,7 +98,7 @@ uvicorn app:app --reload
 - Tạo và kích hoạt môi trường ảo:
   ```sh
   python -m venv venv
-  .\venv\Scripts\activate ( C:/Users/nghia/Documents/workspace/.venv/Scripts/Activate.ps1 ) ( conda activate tf-gpu )
+  .\venv\Scripts\activate
   ```
 - Cài đặt các package:
   ```sh
@@ -117,3 +117,4 @@ Bạn có thể bổ sung chi tiết cho từng file hoặc quy trình theo nhu 
 =======
 # Sign-Language
 >>>>>>> fd1814681fb65b006492108b831c135f1dc5598f
+
