@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Nhận diện ngôn ngữ ký hiệu qua webcam</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; background: #e3f2fd; margin: 0; }
+        .container { max-width: 520px; margin: 40px auto; background: #fff; border-radius: 18px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); padding: 36px 32px; }
+        h2 { color: #1976d2; margin-bottom: 18px; }
+        .info { color: #1976d2; margin-bottom: 10px; }
+        video { width: 100%; max-width: 460px; border-radius: 10px; background: #000; }
+        button { background: #1976d2; color: #fff; border: none; border-radius: 6px; padding: 10px 32px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px; }
+        button:disabled { background: #b3e5fc; cursor: not-allowed; }
+        .spinner { display: none; margin: 20px auto; border: 6px solid #e3f2fd; border-top: 6px solid #1976d2; border-radius: 50%; width: 38px; height: 38px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
+        .result-title { color: #1976d2; font-weight: bold; margin-bottom: 6px; }
+        pre { background: #f4f4f4; padding: 12px; border-radius: 6px; font-size: 1rem; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; }
+        .error { color: #d32f2f; font-weight: 500; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Nhận diện ngôn ngữ ký hiệu qua webcam</h2>
+        <div class="info">Bật webcam, thực hiện hành động ký hiệu, ghi lại và nhận diện.</div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+            <video id="actionVideo" autoplay playsinline></video>
+            <canvas id="actionCanvas" style="display:none;"></canvas>
+            <div>
+                <button id="startActionCamBtn" type="button">Bật webcam</button>
+                <button id="stopActionCamBtn" type="button" disabled>Tắt webcam</button>
+                <button id="recordActionBtn" type="button" disabled>Ghi lại hành động</button>
+                <button id="predictActionBtn" type="button" disabled>Nhận diện</button>
+            </div>
+        </div>
+        <div class="spinner" id="spinner-action"></div>
+        <div id="actionResult" style="margin-top:16px;"></div>
+    </div>
+    <script>
+        // Chỉ giữ lại JS cho nhận diện hành động
+        const startActionCamBtn = document.getElementById('startActionCamBtn');
+        const stopActionCamBtn = document.getElementById('stopActionCamBtn');
+        const recordActionBtn = document.getElementById('recordActionBtn');
+        const predictActionBtn = document.getElementById('predictActionBtn');
+        const actionVideo = document.getElementById('actionVideo');
+        const actionCanvas = document.getElementById('actionCanvas');
+        const actionResult = document.getElementById('actionResult');
+        const spinnerAction = document.getElementById('spinner-action');
+        let actionStream;
+        let actionFrames = [];
+        let actionRecording = false;
+        let actionInterval;
+        const ACTION_SEQUENCE_LENGTH = 60;
+
+        startActionCamBtn.addEventListener('click', async function() {
+            try {
+                actionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                actionVideo.srcObject = actionStream;
+                startActionCamBtn.disabled = true;
+                stopActionCamBtn.disabled = false;
+                recordActionBtn.disabled = false;
+                predictActionBtn.disabled = true;
+                actionFrames = [];
+                actionResult.innerHTML = '';
+            } catch (err) {
+                actionResult.innerHTML = `<div class="error">Không bật được webcam: ${err}</div>`;
+            }
+        });
+
+        stopActionCamBtn.addEventListener('click', function() {
+            if (actionStream) {
+                actionStream.getTracks().forEach(t => t.stop());
+                actionStream = null;
+            }
+            actionVideo.srcObject = null;
+            startActionCamBtn.disabled = false;
+            stopActionCamBtn.disabled = true;
+            recordActionBtn.disabled = true;
+            predictActionBtn.disabled = true;
+            actionFrames = [];
+            actionResult.innerHTML = '';
+        });
+
+        recordActionBtn.addEventListener('click', function() {
+            if (!actionStream) return;
+            actionFrames = [];
+            actionRecording = true;
+            recordActionBtn.disabled = true;
+            predictActionBtn.disabled = true;
+            actionResult.innerHTML = "Đang ghi lại hành động...";
+            let count = 0;
+            actionInterval = setInterval(() => {
+                if (!actionRecording || count >= ACTION_SEQUENCE_LENGTH) {
+                    clearInterval(actionInterval);
+                    actionRecording = false;
+                    recordActionBtn.disabled = false;
+                    predictActionBtn.disabled = false;
+                    actionResult.innerHTML = `Đã ghi ${actionFrames.length} frame. Nhấn 'Nhận diện' để gửi lên server.`;
+                    return;
+                }
+                const w = actionVideo.videoWidth;
+                const h = actionVideo.videoHeight;
+                if (w && h) {
+                    actionCanvas.width = w;
+                    actionCanvas.height = h;
+                    const ctx = actionCanvas.getContext('2d');
+                    ctx.drawImage(actionVideo, 0, 0, w, h);
+                    const dataUrl = actionCanvas.toDataURL('image/jpeg');
+                    actionFrames.push(dataUrl);
+                    count++;
+                }
+            }, 50);
+        });
+
+        predictActionBtn.addEventListener('click', async function() {
+            if (actionFrames.length < ACTION_SEQUENCE_LENGTH) {
+                actionResult.innerHTML = `<div class="error">Cần ghi đủ ${ACTION_SEQUENCE_LENGTH} frame.</div>`;
+                return;
+            }
+            spinnerAction.style.display = "block";
+            actionResult.innerHTML = "";
+            predictActionBtn.disabled = true;
+            try {
+                const res = await fetch('/asl/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frames: actionFrames })
+                });
+                const data = await res.json();
+                predictActionBtn.disabled = false;
+                spinnerAction.style.display = "none";
+                if (data.error) {
+                    actionResult.innerHTML = `<div class="error"><b>Lỗi:</b> ${data.error}</div>`;
+                } else {
+                    actionResult.innerHTML = `
+                        <div class="result-title">Kết quả nhận diện:</div>
+                        <pre>Hành động: ${data.label}\nĐộ tin cậy: ${(data.confidence*100).toFixed(2)}%</pre>
+                    `;
+                }
+            } catch (err) {
+                predictActionBtn.disabled = false;
+                spinnerAction.style.display = "none";
+                actionResult.innerHTML = `<div class="error"><b>Lỗi:</b> ${err}</div>`;
+            }
+        });
+    </script>
+</body>
+</html>
